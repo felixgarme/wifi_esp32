@@ -1,66 +1,120 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Configurador Bluetooth ESP32</title>
+    <title>ESP32-C3 Web Bluetooth</title>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; background-color: #e0f7fa; padding-top: 50px; }
-        .card { background: white; padding: 30px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        input { width: 90%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 6px; }
-        button { background-color: #007bff; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; margin-top: 15px; }
-        button:hover { background-color: #0056b3; }
-        #status { margin-top: 15px; font-weight: bold; color: #555; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f4f4f9;
+            color: #333;
+        }
+        .card {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+        }
+        button {
+            background-color: #0070f3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-bottom: 20px;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #005bb5; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        #datos {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #2c3e50;
+            margin: 20px 0;
+            padding: 20px;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+        }
+        #estado { color: #666; font-size: 0.9rem; }
     </style>
 </head>
 <body>
+
     <div class="card">
-        <h2>🌐 Configurar WiFi por Bluetooth</h2>
-        <input type="text" id="ssid" placeholder="Nombre de tu red WiFi" required>
-        <input type="password" id="pass" placeholder="Contraseña de tu WiFi" required>
-        <button onclick="enviarPorBluetooth()">Buscar ESP32 y Enviar</button>
-        <p id="status">Esperando conexión...</p>
+        <h2>Conexión ESP32-C3</h2>
+        <button id="btnConectar">Conectar por Bluetooth</button>
+        <div id="estado">Esperando conexión...</div>
+        <div id="datos">--</div>
     </div>
 
     <script>
-        async function enviarPorBluetooth() {
-            const statusText = document.getElementById('status');
-            const ssid = document.getElementById('ssid').value;
-            const pass = document.getElementById('pass').value;
+        // Estos UUIDs deben SER LOS MISMOS que programes en tu ESP32-C3
+        const SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+        const CHARACTERISTIC_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
 
-            if(!ssid || !pass) { alert("Llena ambos campos primero."); return; }
+        const btnConectar = document.getElementById('btnConectar');
+        const txtEstado = document.getElementById('estado');
+        const txtDatos = document.getElementById('datos');
 
+        btnConectar.addEventListener('click', async () => {
             try {
-                statusText.innerText = "Buscando dispositivo...";
+                txtEstado.innerText = 'Buscando ESP32...';
                 
-                // 1. Escanear y conectar al dispositivo
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'ESP32_LuzRGB' }],
-                    optionalServices: ['4fafc201-1fb5-459e-8fcc-c5c9c331914b'] // El UUID que pusimos en Arduino
+                // 1. Solicitar dispositivo (filtrando por el servicio UUID)
+                const dispositivo = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [SERVICE_UUID] }]
                 });
 
-                statusText.innerText = "Conectando al Bluetooth...";
-                const server = await device.gatt.connect();
+                txtEstado.innerText = 'Conectando al dispositivo...';
 
-                // 2. Obtener el servicio y la característica
-                const service = await server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
-                const characteristic = await service.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
+                // Si el dispositivo se desconecta, mostrarlo
+                dispositivo.addEventListener('gattserverdisconnected', () => {
+                    txtEstado.innerText = 'Desconectado ❌';
+                    btnConectar.disabled = false;
+                });
 
-                // 3. Formatear y enviar datos ("SSID\nPASSWORD")
-                statusText.innerText = "Enviando credenciales...";
-                const payload = ssid + "\n" + pass;
-                const encoder = new TextEncoder();
-                await characteristic.writeValue(encoder.encode(payload));
+                // 2. Conectar al servidor GATT
+                const servidor = await dispositivo.gatt.connect();
+                
+                // 3. Obtener el servicio
+                const servicio = await servidor.getPrimaryService(SERVICE_UUID);
+                
+                // 4. Obtener la característica
+                const caracteristica = await servicio.getCharacteristic(CHARACTERISTIC_UUID);
 
-                statusText.innerText = "¡Enviado con éxito! Mira el ESP32.";
-                statusText.style.color = "green";
+                // 5. Iniciar las "Notificaciones" para escuchar en tiempo real
+                await caracteristica.startNotifications();
+                txtEstado.innerText = 'Conectado y escuchando ✅';
+                btnConectar.disabled = true;
+
+                // 6. Escuchar los eventos cada vez que el ESP32 envíe un dato
+                caracteristica.addEventListener('characteristicvaluechanged', (event) => {
+                    // Aquí decodificamos el valor enviado por el ESP32
+                    // Asumimos que el ESP32 envía texto (String)
+                    const decodificador = new TextDecoder('utf-8');
+                    const valor = decodificador.decode(event.target.value);
+                    
+                    // Actualizar la pantalla
+                    txtDatos.innerText = valor;
+                    console.log('Dato recibido:', valor);
+                });
 
             } catch (error) {
-                console.error(error);
-                statusText.innerText = "Error o conexión cancelada.";
-                statusText.style.color = "red";
+                console.error("Error: ", error);
+                txtEstado.innerText = 'Error: ' + error.message;
             }
-        }
+        });
     </script>
 </body>
 </html>
