@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configurador Bluetooth ESP32</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background-color: #e0f7fa; padding-top: 50px; }
+        .card { background: white; padding: 30px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        input { width: 90%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 6px; }
+        button { background-color: #007bff; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; margin-top: 15px; }
+        button:hover { background-color: #0056b3; }
+        #status { margin-top: 15px; font-weight: bold; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>🌐 Configurar WiFi por Bluetooth</h2>
+        <input type="text" id="ssid" placeholder="Nombre de tu red WiFi" required>
+        <input type="password" id="pass" placeholder="Contraseña de tu WiFi" required>
+        <button onclick="enviarPorBluetooth()">Buscar ESP32 y Enviar</button>
+        <p id="status">Esperando conexión...</p>
+    </div>
+
+    <script>
+        async function enviarPorBluetooth() {
+            const statusText = document.getElementById('status');
+            const ssid = document.getElementById('ssid').value;
+            const pass = document.getElementById('pass').value;
+
+            if(!ssid || !pass) { alert("Llena ambos campos primero."); return; }
+
+            try {
+                statusText.innerText = "Buscando dispositivo...";
+                
+                // 1. Escanear y conectar al dispositivo
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'ESP32_LuzRGB' }],
+                    optionalServices: ['4fafc201-1fb5-459e-8fcc-c5c9c331914b'] // El UUID que pusimos en Arduino
+                });
+
+                statusText.innerText = "Conectando al Bluetooth...";
+                const server = await device.gatt.connect();
+
+                // 2. Obtener el servicio y la característica
+                const service = await server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
+                const characteristic = await service.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
+
+                // 3. Formatear y enviar datos ("SSID\nPASSWORD")
+                statusText.innerText = "Enviando credenciales...";
+                const payload = ssid + "\n" + pass;
+                const encoder = new TextEncoder();
+                await characteristic.writeValue(encoder.encode(payload));
+
+                statusText.innerText = "¡Enviado con éxito! Mira el ESP32.";
+                statusText.style.color = "green";
+
+            } catch (error) {
+                console.error(error);
+                statusText.innerText = "Error o conexión cancelada.";
+                statusText.style.color = "red";
+            }
+        }
+    </script>
+</body>
+</html>
